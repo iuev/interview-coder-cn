@@ -171,6 +171,25 @@ const api = {
     ipcRenderer.removeAllListeners('solution-chunk')
   },
 
+  // Thinking models reason before they answer; those chunks render on their own
+  onReasoningChunk: (callback: (chunk: string) => void) => {
+    ipcRenderer.on('reasoning-chunk', (_event, chunk) => {
+      callback(chunk)
+    })
+  },
+  removeReasoningChunkListener: () => {
+    ipcRenderer.removeAllListeners('reasoning-chunk')
+  },
+
+  // A later request (appended screenshot, follow-up) starts a new reasoning
+  // round, shown in its own block above its own answer
+  onReasoningRoundStart: (callback: () => void) => {
+    ipcRenderer.on('reasoning-round-start', callback)
+  },
+  removeReasoningRoundStartListener: () => {
+    ipcRenderer.removeAllListeners('reasoning-round-start')
+  },
+
   // Stop solution stream
   stopSolutionStream: () => ipcRenderer.invoke('stopSolutionStream'),
 

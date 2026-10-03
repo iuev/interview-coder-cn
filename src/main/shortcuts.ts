@@ -19,6 +19,7 @@ import { state, setPageChangeHandler, inModePage } from './state'
 import { settings, getModeProfile } from './settings'
 import { getTranscriptionText, clearTranscriptionText } from './transcription'
 import { consumeStream, extractErrorMessage, isImageInputRefused } from './stream'
+import type { StreamChunk } from './stream'
 import { requestHint, stopHints, clearConversation } from './conversation'
 
 type Shortcut = {
@@ -346,15 +347,16 @@ function describeAnswerError(mainWindow: BrowserWindow, error: unknown): string 
 }
 
 /**
- * Stream an answer onto the main page: every chunk as `solution-chunk`, then
- * `solution-complete`, `solution-stopped` (stopped by the user) or
- * `solution-error`. A stream replaced by a newer request ends silently.
+ * Stream an answer onto the main page: reasoning chunks as `reasoning-chunk`,
+ * answer chunks as `solution-chunk`, then `solution-complete`,
+ * `solution-stopped` (stopped by the user) or `solution-error`. A stream
+ * replaced by a newer request ends silently.
  * `onComplete` gets the whole answer, only when it finished on its own.
  */
 async function runAnswer(
   mainWindow: BrowserWindow,
   streamContext: StreamContext,
-  createStream: (signal: AbortSignal) => AsyncIterable<string>,
+  createStream: (signal: AbortSignal) => AsyncIterable<StreamChunk>,
   onComplete: (answer: string) => void,
   { showLoading }: { showLoading: boolean }
 ): Promise<void> {
@@ -364,7 +366,7 @@ async function runAnswer(
   if (showLoading) send('ai-loading-start')
   try {
     const outcome = await consumeStream(createStream, streamContext.controller, (chunk) =>
-      send('solution-chunk', chunk)
+      send(chunk.kind === 'reasoning' ? 'reasoning-chunk' : 'solution-chunk', chunk.delta)
     )
     if (outcome.status === 'aborted') {
       if (streamContext.reason === 'user') send('solution-stopped')
@@ -544,6 +546,8 @@ const callbacks: Record<string, () => void> = {
     } else {
       mainWindow.webContents.send('solution-chunk', '\n\n')
     }
+    // The appended screenshot gets its own reasoning, shown in its own block
+    mainWindow.webContents.send('reasoning-round-start')
     await runAnswer(
       mainWindow,
       streamContext,
@@ -833,6 +837,8 @@ ipcMain.handle('sendFollowUpQuestion', async (_event, question: string) => {
 
   // Add a separator before the follow-up response
   mainWindow.webContents.send('solution-chunk', '\n\n---\n\n')
+  // The follow-up gets its own reasoning, shown in its own block
+  mainWindow.webContents.send('reasoning-round-start')
 
   await runAnswer(
     mainWindow,

@@ -31,6 +31,8 @@ export interface HintCard {
   source: 'auto' | 'manual'
   status: HintStatus
   text: string
+  /** What the model reasoned before `text`; empty for non-thinking models */
+  reasoning: string
   error?: string
   /** From the request to the first chunk, in ms; absent until the first chunk */
   latencyMs?: number

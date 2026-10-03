@@ -1,8 +1,42 @@
 import { create } from 'zustand'
 
+/** One request round: its reasoning, and where its answer text begins */
+export interface ReasoningRound {
+  /** What the model reasoned in this round; empty for non-thinking models */
+  chunks: string[]
+  /**
+   * Length of the answer text when this round began. Its answer segment is the
+   * text from here to the next round's snapshot.
+   */
+  textStart: number
+}
+
+/** A round's collapse state, once the user has clicked its header */
+export interface RoundUi {
+  open: boolean
+  pinned: boolean
+}
+
 interface SolutionState {
   isLoading: boolean
   solutionChunks: string[]
+  /**
+   * Every request — the first screenshot, each appended screenshot, each
+   * follow-up — gets a round, so reasoning and answer text stay paired no
+   * matter which of the two the model produced. Round 0 exists from the moment
+   * the conversation is cleared; later rounds are opened by
+   * `reasoning-round-start`. A round without reasoning shows no block but
+   * still owns its answer segment.
+   *
+   * These live in the store rather than component state because the page is
+   * unmounted whenever the user visits the settings — the conversation must
+   * survive that round trip intact.
+   */
+  reasoningRounds: ReasoningRound[]
+  /** The round reasoning chunks are currently landing in; null when none */
+  liveRound: number | null
+  /** Collapse state the user chose per round; rounds not here follow the stream */
+  roundUi: Record<number, RoundUi>
   screenshotData: string | null
   errorMessage: string | null
   /** How long the last request took, in ms; null until one has finished */
@@ -12,6 +46,13 @@ interface SolutionState {
 interface SolutionStore extends SolutionState {
   setIsLoading: (isReceiving: boolean) => void
   addSolutionChunk: (chunk: string) => void
+  /** Append to the last round, which becomes the live one */
+  addReasoningChunk: (chunk: string) => void
+  /** Open a round for the next request, whose answer text starts at `textStart` */
+  startReasoningRound: (textStart: number) => void
+  setLiveRound: (index: number | null) => void
+  /** The user clicked a round's header: pin it to the state they picked */
+  setRoundOpen: (index: number, open: boolean) => void
   setSolutionChunks: (chunks: string[]) => void
   setScreenshotData: (data: string | null) => void
   setErrorMessage: (message: string | null) => void
@@ -23,6 +64,9 @@ interface SolutionStore extends SolutionState {
 const defaultState: SolutionState = {
   isLoading: false,
   solutionChunks: [],
+  reasoningRounds: [],
+  liveRound: null,
+  roundUi: {},
   screenshotData: null,
   errorMessage: null,
   durationMs: null
@@ -38,6 +82,33 @@ export const useSolutionStore = create<SolutionStore>()((set) => ({
       solutionChunks: [...state.solutionChunks, chunk]
     }))
   },
+  addReasoningChunk: (chunk) => {
+    set((state) => {
+      // A stream that somehow began without a clear still gets a round to land in
+      const rounds =
+        state.reasoningRounds.length > 0 ? state.reasoningRounds : [{ chunks: [], textStart: 0 }]
+      const index = rounds.length - 1
+      const last = rounds[index]
+      return {
+        reasoningRounds: [...rounds.slice(0, index), { ...last, chunks: [...last.chunks, chunk] }],
+        liveRound: index
+      }
+    })
+  },
+  startReasoningRound: (textStart) => {
+    set((state) => ({
+      reasoningRounds: [...state.reasoningRounds, { chunks: [], textStart }],
+      liveRound: null
+    }))
+  },
+  setLiveRound: (index) => {
+    set({ liveRound: index })
+  },
+  setRoundOpen: (index, open) => {
+    set((state) => ({
+      roundUi: { ...state.roundUi, [index]: { open, pinned: true } }
+    }))
+  },
   setSolutionChunks: (chunks) => {
     set({ solutionChunks: chunks })
   },
@@ -51,8 +122,17 @@ export const useSolutionStore = create<SolutionStore>()((set) => ({
     set({ durationMs: ms })
   },
   clearSolution: () => {
-    // A new request is starting, so the previous timing no longer applies
-    set({ solutionChunks: [], isLoading: false, errorMessage: null, durationMs: null })
+    // A new conversation: the previous chunks and timing no longer apply, and
+    // round 0 opens so the text to come is paired with the reasoning to come
+    set({
+      solutionChunks: [],
+      reasoningRounds: [{ chunks: [], textStart: 0 }],
+      liveRound: null,
+      roundUi: {},
+      isLoading: false,
+      errorMessage: null,
+      durationMs: null
+    })
   },
   resetState: () => {
     set(defaultState)

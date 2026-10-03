@@ -1,11 +1,11 @@
 /**
  * Asking the model to skip its thinking phase.
  *
- * The app never shows a model's reasoning, so while a thinking model reasons
- * the user stares at a spinner. Measured with a screenshot of an easy problem,
- * switching it off took DeepSeek V4.1 Flash and GLM-4.5V from 4–28s to 1–2s
- * before the first visible character; models that do not think by default are
- * unaffected.
+ * The app shows a model's reasoning as it streams (see ai.ts), but the answer
+ * itself still waits for it. Measured with a screenshot of an easy problem,
+ * switching thinking off took DeepSeek V4.1 Flash and GLM-4.5V from 4–28s to
+ * 1–2s before the first character of the answer; models that do not think by
+ * default are unaffected.
  *
  * The OpenAI chat body has no standard field for this and every platform
  * spells it differently, so the fields are merged into the outgoing request
@@ -26,7 +26,7 @@ const OPENAI_HOSTS = ['api.openai.com']
  */
 const THINKING_FIELD_ERROR = /thinking|reasoning/i
 
-/** The API Base URL's host; an empty URL means the SDK default, i.e. OpenAI itself */
+/** The API Base URL's host; an empty URL means OpenAI itself (DEFAULT_API_BASE_URL) */
 function hostOf(baseURL: string): string {
   const url = baseURL.trim()
   if (!url) return OPENAI_HOSTS[0]

@@ -24,7 +24,7 @@ Key capabilities:
 | Styling | Tailwind CSS v4, shadcn/ui (New York style), Radix primitives |
 | State | Zustand 5 (6 stores, 2 with localStorage persistence) |
 | Routing | react-router v7 (HashRouter: `/` 截图模式, `/conversation` 对话模式, `/settings`, `/help`, plus `/toolbar` for the toolbar window) |
-| AI | Vercel AI SDK (`ai` + `@ai-sdk/openai`), streaming via `streamText()` |
+| AI | Vercel AI SDK (`ai` + `@ai-sdk/openai-compatible`), streaming via `streamText()` |
 | Build | electron-vite (Vite 7), electron-builder 25 |
 | Linting | ESLint 9 (flat config), Prettier |
 
@@ -38,7 +38,7 @@ src/
 │   ├── toolbar-window.ts    # Overlay toolbar window: bounds/visibility/opacity glued to main window
 │   ├── shortcuts.ts         # Global shortcuts registration + 截图模式 AI streaming orchestration (largest file)
 │   ├── conversation.ts      # 对话模式: utterances, hint cards, automatic / manual hint triggering
-│   ├── stream.ts            # consumeStream() shared by both modes, API error messages, image-refusal detection
+│   ├── stream.ts            # consumeStream() shared by both modes (answer and reasoning chunks), API error messages, image-refusal detection
 │   ├── ai.ts                # Vercel AI SDK integration, one streaming function per request kind, each with its mode's profile
 │   ├── knowledge.ts         # 资料库: material on disk under userData, IPC, the system prompt block per mode
 │   ├── knowledge-parse.ts   # Text out of an imported PDF (unpdf) / .docx (mammoth) / Markdown / TXT (UTF-8, UTF-16, GBK)
@@ -174,8 +174,8 @@ src/
 2. `shortcuts.ts` callback triggers `takeScreenshot()` → `desktopCapturer` → base64 PNG. It captures the screen under the cursor, or the one fixed in `captureScreen` (a `Display.id`; a disconnected one falls back to the cursor), matching the source by `display_id` — `desktopCapturer` returns screens in no particular order. A `captureRegion` overrides the screen choice and crops the capture (see Capture Region)
 3. Main sends `screenshot-taken` and `ai-loading-start` to renderer
 4. Main calls `getSolutionStream(base64Image)` → Vercel AI SDK `streamText()`
-5. Stream chunks sent to renderer via `solution-chunk` IPC events
-6. Renderer accumulates chunks in `useSolutionStore` and renders via `MarkdownRenderer`
+5. Answer chunks sent to renderer via `solution-chunk` IPC events, a thinking model's reasoning via `reasoning-chunk`
+6. Renderer accumulates chunks in `useSolutionStore` and renders via `MarkdownRenderer`, each request's reasoning in a folding block above its answer
 7. On completion: `solution-complete`; on error: `solution-error`; on abort: `solution-stopped`
 
 ### IPC Channels
@@ -203,6 +203,7 @@ src/
 - `sync-app-state` — push state changes (e.g., mouse ignore toggle) to both the main and the toolbar window
 - `screenshot-taken` / `screenshots-updated` — screenshot data (`screenshots-updated` also carries the untruncated conversation total)
 - `solution-clear` / `solution-chunk` / `solution-complete` / `solution-stopped` / `solution-error` — AI streaming lifecycle
+- `reasoning-chunk` / `reasoning-round-start` — a thinking model's reasoning, streamed above the answer; a later request (appended screenshot, follow-up) starts a new round with its own block
 - `ai-loading-start` / `ai-loading-end` — loading state
 - `solution-duration` — how long the finished request took (ms), timed in main from the key press
 - `switch-api-profile` — step the current mode's AI profile (`1` / `-1`); the list lives in the renderer store
@@ -224,7 +225,7 @@ src/
 |-------|------|-----------|-----------|
 | `useSettingsStore` | `lib/store/settings.ts` | Yes (v8) | `apiProfiles`, `activeProfileId` (the one being edited), `screenshotProfileId`, `conversationProfileId`, `hasConfiguredApi`, `apiBaseURL`, `apiKey`, `apiHeaders`, `model`, `disableThinking` (mirror of the edited profile), `customModels`, `customModelsByBaseURL`, `modelByBaseURL`, `scenes` (prompt scenes, each with a `mode`), `activeSceneId` / `conversationSceneId`, `customPrompt` / `conversationPrompt` (derived from each mode's scene), `lastMode`, `conversationHintMode`, `conversationSilenceMs`, `conversationMinChars`, `conversationTranscriptHidden`, `opacity`, `resizable`, `showOverlayToolbar`, `toolbarHoverDelay`, `hideShortcutHints`, `screenshotDisplay`, `captureScreen`, `captureRegion`, `screenshotAutoSave`, `screenshotDir`, `codeAutoSave`, `codeSaveDir`, `codeFileBaseName`, `codeNamingMode`, `codeCopyToClipboard`, `dashscopeApiKey` |
 | `useShortcutsStore` | `lib/store/shortcuts.ts` | Yes (v5) | `shortcuts` (action → key mapping with categories); `merge` adds new default actions on every load, so a new shortcut needs no `version` bump |
-| `useSolutionStore` | `lib/store/solution.ts` | No | `isLoading`, `solutionChunks`, `screenshotData`, `errorMessage`, `durationMs` |
+| `useSolutionStore` | `lib/store/solution.ts` | No | `isLoading`, `solutionChunks`, `reasoningRounds`, `liveRound`, `roundUi`, `screenshotData`, `errorMessage`, `durationMs` |
 | `useTranscriptionStore` | `lib/store/transcription.ts` | No | `isTranscribing`, `transcriptionText`, `errorMessage` |
 | `useConversationStore` | `lib/store/conversation.ts` | No | `utterances`, `hints`, `errorMessage`, `focusedHintId` |
 | `useAppStore` | `lib/store/app.ts` | No | `ignoreMouse`, `inConversationPage` |
@@ -269,7 +270,7 @@ Both windows are created with `resizable: false` — toggling Electron's native 
 ### AI Integration
 
 - All AI calls go through `src/main/ai.ts` using Vercel AI SDK's `streamText()`
-- Provider: `@ai-sdk/openai` with custom `baseURL` (works with any OpenAI-compatible API)
+- Provider: `@ai-sdk/openai-compatible` with custom `baseURL` (works with any OpenAI-compatible API; an empty one means OpenAI, `DEFAULT_API_BASE_URL`). Not `@ai-sdk/openai`: its chat-completions parser drops the `reasoning_content` / `reasoning` deltas thinking models send
 - Custom request headers (`apiHeaders`, one `Name: Value` per line) go on every AI request and on the `/models` fetch, through `buildRequestHeaders()` in `src/shared/request-headers.ts`. They override the Bearer key case-insensitively, so a gateway can replace `Authorization`
 - Model fallback: `Qwen/Qwen3-VL-32B-Instruct` for SiliconFlow, `gpt-5-mini` otherwise
 - AI profiles (`apiProfiles`): each holds its own URL / key / headers / model / thinking switch / `vision` flag. Each mode sends its requests with its own (`screenshotProfileId` / `conversationProfileId`, picked in the mode's settings group or via 「用于」); main resolves it with `getModeProfile(mode)` in `settings.ts`. `activeProfileId` is only the profile open in the AI 模型 editor, mirrored onto the flat `apiBaseURL` / `apiKey` / `apiHeaders` / `model` / `disableThinking` fields the editor binds to (`CREDENTIAL_KEYS`). The profile is authoritative (`reconcileApiProfiles()` restores the flat fields from it on load), so never write those with `updateSetting`: use `updateCredential()`, `changeApiBaseURL()` or `setModel()`, which keep the profile in step — otherwise the edit is lost on the next profile switch or restart
@@ -282,6 +283,7 @@ Both windows are created with `resizable: false` — toggling Electron's native 
 - Streaming functions: `getSolutionStream` (first screenshot), `getFollowUpStream` (follow-up), `getGeneralStream` (multi-screenshot), all run through `runAnswer()` in `shortcuts.ts`; `getHintStream` (对话模式, see below)
 - 「关闭思考」 (`disableThinking`, per profile, off by default): the SDK has no field for it and every platform spells it differently, so `createThinkingOffFetch()` in `thinking.ts` wraps `fetch` and merges the fields into the request body — OpenRouter `reasoning: { enabled: false }`, OpenAI host or a `gpt-`/`o<n>` model name `reasoning_effort: 'none'`, everyone else both `thinking: { type: 'disabled' }` and `enable_thinking: false`. OpenAI rejects any unknown field, and thinking-only models reject the switch, so a 400/422 whose body mentions thinking/reasoning is resent without the fields and that base URL + model is remembered for the session. The switch never makes a request fail; at worst it costs one extra round trip
 - Conversation history (`conversationMessages`) is maintained in `shortcuts.ts` as `ModelMessage[]`
+- Reasoning: `ai.ts` turns `fullStream` into `StreamChunk`s tagged `reasoning` or `text` (`stream.ts`); only the text goes into `conversationMessages`. 截图模式 shows it per request: `clearSolution()` opens round 0, each appended screenshot / follow-up sends `reasoning-round-start` after its separator, and each round (`reasoningRounds`, with the answer length when it began as `textStart`) renders its block above its own slice of the answer — three streaming lines, folded once the answer starts. Both modes render it with `MarkdownRenderer compact` (OpenAI's summaries open with a `**title**`), whose whole-line grid in `base.css` keeps those three lines whole. 对话模式 keeps it on the card (`HintCard.reasoning`) and shows it once the card is published, not per chunk
 - When an answer finishes naturally (not stopped, not failed), `handleGeneratedCode()` in `save-code.ts` copies its first code block to the clipboard and/or saves it as `<base><n>.<ext>` (extension from the fence language); both are opt-in and silent
 
 ### Capture Region

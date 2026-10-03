@@ -4,12 +4,20 @@
  * IPC events.
  */
 
+/**
+ * One slice of a model's reply. Thinking models reason before they answer;
+ * `reasoning` deltas carry that reasoning so the renderer can show it while
+ * it forms. `text` is the answer itself and the only part kept in the
+ * conversation history.
+ */
+export type StreamChunk = { kind: 'reasoning'; delta: string } | { kind: 'text'; delta: string }
+
 export type StreamOutcome =
   /** Ran to the end on its own */
-  | { status: 'complete'; text: string }
+  | { status: 'complete'; text: string; reasoning: string }
   /** Cut short through the controller; the caller knows why */
-  | { status: 'aborted'; text: string }
-  | { status: 'failed'; text: string; error: unknown }
+  | { status: 'aborted'; text: string; reasoning: string }
+  | { status: 'failed'; text: string; reasoning: string; error: unknown }
 
 /**
  * Forward every chunk until the stream ends, fails or is aborted. Chunks still
@@ -17,23 +25,25 @@ export type StreamOutcome =
  * never sees them.
  */
 export async function consumeStream(
-  createStream: (signal: AbortSignal) => AsyncIterable<string>,
+  createStream: (signal: AbortSignal) => AsyncIterable<StreamChunk>,
   controller: AbortController,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: StreamChunk) => void
 ): Promise<StreamOutcome> {
   const { signal } = controller
   let text = ''
+  let reasoning = ''
   try {
     for await (const chunk of createStream(signal)) {
       if (signal.aborted) break
-      text += chunk
+      if (chunk.kind === 'reasoning') reasoning += chunk.delta
+      else text += chunk.delta
       onChunk(chunk)
     }
   } catch (error) {
     // An abort surfaces as an AbortError; it is not a failure
-    if (!signal.aborted) return { status: 'failed', text, error }
+    if (!signal.aborted) return { status: 'failed', text, reasoning, error }
   }
-  return { status: signal.aborted ? 'aborted' : 'complete', text }
+  return { status: signal.aborted ? 'aborted' : 'complete', text, reasoning }
 }
 
 type ApiError = Error & {

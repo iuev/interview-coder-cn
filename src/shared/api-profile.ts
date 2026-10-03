@@ -5,6 +5,9 @@
  */
 export type AppMode = 'screenshot' | 'conversation'
 
+/** Where requests go when a profile's API Base URL is left empty: OpenAI itself */
+export const DEFAULT_API_BASE_URL = 'https://api.openai.com/v1'
+
 /**
  * One saved AI endpoint: everything needed to send a request. The renderer
  * keeps and edits the list; main picks the one the current mode uses.

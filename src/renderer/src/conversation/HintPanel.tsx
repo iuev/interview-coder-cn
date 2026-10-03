@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import { Eraser, LoaderCircle, PanelLeftOpen, X } from 'lucide-react'
+import { Brain, Eraser, LoaderCircle, PanelLeftOpen, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
@@ -135,6 +135,17 @@ function HintCardView({ card, ref }: { card: HintCard; ref: (el: HTMLElement | n
           正在生成…
         </p>
       ) : null}
+      {card.reasoning && card.status !== 'waiting' && (
+        <details className="mb-1 text-xs text-app-muted-fg">
+          <summary className="flex cursor-pointer items-center gap-1 select-none">
+            <Brain className="size-3" />
+            思考过程
+          </summary>
+          <div className="mt-1 max-h-32 overflow-y-auto break-words opacity-80">
+            <MarkdownRenderer compact>{card.reasoning}</MarkdownRenderer>
+          </div>
+        </details>
+      )}
       {card.text && card.status !== 'waiting' && <MarkdownRenderer>{card.text}</MarkdownRenderer>}
       {card.status === 'error' && (
         <p className="text-sm break-words text-red-400">生成失败：{card.error}</p>

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { buildRequestHeaders } from '../shared/request-headers'
+import { DEFAULT_API_BASE_URL } from '../shared/api-profile'
 
 export interface PlatformModel {
   id: string
@@ -23,9 +24,6 @@ export interface ListModelsOptions {
   headers?: string
 }
 
-/** What @ai-sdk/openai calls when no base URL is set */
-const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-
 /**
  * Ask an OpenAI-compatible platform which models it serves. Runs in main
  * rather than the renderer to avoid CORS, and uses the same global `fetch` as
@@ -39,7 +37,7 @@ async function listModels(
   // Started up front so it downloads alongside the model list
   const visionFlags = visionCatalog ? VISION_CATALOGS[visionCatalog]() : undefined
 
-  const base = (baseURL.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '')
+  const base = (baseURL.trim() || DEFAULT_API_BASE_URL).replace(/\/+$/, '')
   const url = `${base}/models${query ? `?${query}` : ''}`
   let res: Response
   try {

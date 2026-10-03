@@ -1,10 +1,11 @@
-import { streamText, type ModelMessage } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
+import { streamText, type ModelMessage, type TextStreamPart, type ToolSet } from 'ai'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { settings, getModeProfile } from './settings'
-import type { ApiProfile, AppMode } from '../shared/api-profile'
+import { DEFAULT_API_BASE_URL, type ApiProfile, type AppMode } from '../shared/api-profile'
 import { buildRequestHeaders } from '../shared/request-headers'
 import { createThinkingOffFetch } from './thinking'
 import { getKnowledgePrompt } from './knowledge'
+import type { StreamChunk } from './stream'
 
 // The system prompts are fully managed by the renderer (prompt scenes in the
 // settings store, one active scene per mode) and synced here via
@@ -22,8 +23,13 @@ function reportThinkingRefused(model: string) {
 }
 
 function createProvider(profile: ApiProfile) {
-  return createOpenAI({
-    baseURL: profile.apiBaseURL,
+  // The app only ever talks OpenAI-compatible chat-completions; this provider
+  // also surfaces thinking models' reasoning (`reasoning_content` / `reasoning`
+  // deltas) as reasoning stream parts, which @ai-sdk/openai drops. It has no
+  // default base URL, so an empty one means OpenAI here as everywhere else
+  return createOpenAICompatible({
+    name: 'interview-coder-cn',
+    baseURL: profile.apiBaseURL.trim() || DEFAULT_API_BASE_URL,
     apiKey: profile.apiKey,
     headers: buildRequestHeaders(profile.apiKey, profile.apiHeaders),
     // Only when asked for: a plain request is the one every platform accepts
@@ -40,6 +46,20 @@ function getModel(profile: ApiProfile) {
   return profile.model || fallbackModel
 }
 
+/**
+ * One chunk at a time, tagged reasoning or answer text, so callers can route
+ * them to their own events. Other stream parts (tool calls, sources, …) are
+ * not produced with the plain chat setup and are dropped here.
+ */
+async function* streamChunks(
+  fullStream: AsyncIterable<TextStreamPart<ToolSet>>
+): AsyncIterable<StreamChunk> {
+  for await (const event of fullStream) {
+    if (event.type === 'reasoning-delta') yield { kind: 'reasoning', delta: event.text }
+    else if (event.type === 'text-delta') yield { kind: 'text', delta: event.text }
+  }
+}
+
 function streamWith(
   mode: AppMode,
   messages: ModelMessage[],
@@ -49,8 +69,8 @@ function streamWith(
   const profile = getModeProfile(mode)
   const openai = createProvider(profile)
 
-  const { textStream } = streamText({
-    model: openai.chat(getModel(profile)),
+  const { fullStream } = streamText({
+    model: openai.chatModel(getModel(profile)),
     system: getSystemPrompt(mode, extraSystem),
     messages,
     abortSignal,
@@ -58,7 +78,7 @@ function streamWith(
       throw err.error ?? err
     }
   })
-  return textStream
+  return streamChunks(fullStream)
 }
 
 export function getSolutionStream(messages: ModelMessage[], abortSignal?: AbortSignal) {

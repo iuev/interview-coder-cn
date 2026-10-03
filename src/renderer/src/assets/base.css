@@ -114,6 +114,28 @@
   border: 1px solid oklch(0.9 0 0);
 }
 
+/* A thinking model's reasoning (MarkdownRenderer `compact`): text-xs, with
+   paragraphs and lists a whole line apart, so the fixed three-line box it
+   streams into never shows half a line */
+.prose.markdown-compact {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.prose.markdown-compact :where(p, ul, ol) {
+  margin-top: 1lh;
+  margin-bottom: 1lh;
+}
+.prose.markdown-compact :where(li) {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.prose.markdown-compact > :first-child {
+  margin-top: 0;
+}
+.prose.markdown-compact > :last-child {
+  margin-bottom: 0;
+}
+
 /* A formula wider than the window scrolls instead of stretching the page */
 .prose .katex-display {
   overflow-x: auto;

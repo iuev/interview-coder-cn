@@ -122,6 +122,7 @@ function onSentenceGrowing(utterance: Utterance) {
     stopStream(card.id)
     card.status = 'waiting'
     card.text = ''
+    card.reasoning = ''
     card.latencyMs = undefined
     publishHint(card)
   }
@@ -149,7 +150,8 @@ function createCard(fromId: number, toId: number): HintCard {
     toId,
     source: 'auto',
     status: 'streaming',
-    text: ''
+    text: '',
+    reasoning: ''
   }
   hints.push(card)
   return card
@@ -199,6 +201,7 @@ async function startHint(
     source,
     status: 'streaming',
     text: '',
+    reasoning: '',
     error: undefined,
     latencyMs: undefined
   } satisfies Partial<HintCard>)
@@ -221,9 +224,15 @@ async function startHint(
     (signal) => getHintStream(messages, signal),
     stream.controller,
     (chunk) => {
+      if (chunk.kind === 'reasoning') {
+        // Kept on the card and shipped with its next publish; reasoning is not
+        // streamed per-chunk the way the hint text is
+        card.reasoning += chunk.delta
+        return
+      }
       card.latencyMs ??= Date.now() - stream.startedAt
-      card.text += chunk
-      send('conversation-hint-chunk', card.id, chunk)
+      card.text += chunk.delta
+      send('conversation-hint-chunk', card.id, chunk.delta)
     }
   )
   // A newer request took the card over, or the conversation was cleared
